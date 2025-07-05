@@ -169,7 +169,6 @@ class QRGeneratorApp:
         )
 
     def save_qr(self):
-        """Сохранение QR-кода в файл."""
         if self.current_qr_image is None:
             self.status_var.set("Ошибка: Нет QR-кода для сохранения")
             return
