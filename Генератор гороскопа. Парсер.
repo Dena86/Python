@@ -1,0 +1,377 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+from typing import Dict, List, Optional, Tuple
+import random
+import requests
+from bs4 import BeautifulSoup
+import sys
+from datetime import datetime
+
+class HoroscopeApp:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.root.title("Генератор персонального гороскопа")
+        self.root.geometry("900x700")
+        self.root.minsize(700, 600)
+        
+        self.signs = {
+            'овен': ('aries', '🔥', 'Марс', 'смелость, инициатива'),
+            'телец': ('taurus', '🌿', 'Венера', 'надежность, практичность'),
+            'близнецы': ('gemini', '🌬️', 'Меркурий', 'общительность, любознательность'),
+            'рак': ('cancer', '🌊', 'Луна', 'чувствительность, интуиция'),
+            'лев': ('leo', '☀️', 'Солнце', 'щедрость, творчество'),
+            'дева': ('virgo', '🌾', 'Меркурий', 'аналитичность, внимание к деталям'),
+            'весы': ('libra', '⚖️', 'Венера', 'гармония, дипломатия'),
+            'скорпион': ('scorpio', '🦂', 'Плутон', 'страсть, проницательность'),
+            'стрелец': ('sagittarius', '🏹', 'Юпитер', 'оптимизм, авантюризм'),
+            'козерог': ('capricorn', '⛰️', 'Сатурн', 'дисциплина, амбициозность'),
+            'водолей': ('aquarius', '🌀', 'Уран', 'оригинальность, гуманизм'),
+            'рыбы': ('pisces', '🐠', 'Нептун', 'сострадание, мечтательность')
+        }
+        
+        self.planets = {
+            'Солнце': 'личность, жизненная сила',
+            'Луна': 'эмоции, подсознание',
+            'Меркурий': 'коммуникация, мышление',
+            'Венера': 'любовь, ценности',
+            'Марс': 'энергия, действия',
+            'Юпитер': 'удача, расширение',
+            'Сатурн': 'ограничения, дисциплина',
+            'Уран': 'изменения, инновации',
+            'Нептун': 'интуиция, духовность',
+            'Плутон': 'трансформация, возрождение'
+        }
+        
+        self.themes = {
+            'любовь': ['романтические встречи', 'гармония в отношениях', 'новые знакомства'],
+            'карьера': ['профессиональные успехи', 'важные решения', 'сотрудничество'],
+            'финансы': ['финансовые возможности', 'инвестиции', 'бюджетирование'],
+            'здоровье': ['физическая активность', 'душевное равновесие', 'режим дня'],
+            'семья': ['взаимопонимание', 'совместные планы', 'поддержка близких'],
+            'творчество': ['вдохновение', 'новые проекты', 'самовыражение']
+        }
+        
+        self.advice_types = {
+            'астрологический': 'С точки зрения звезд',
+            'нумерологический': 'По нумерологическим расчетам',
+            'таро': 'Карты Таро советуют',
+            'эзотерический': 'С духовной точки зрения'
+        }
+        
+        self.setup_styles()
+        self.create_widgets()
+        self.center_window()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+    
+    def setup_styles(self):
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        style.configure(".", font=("Segoe UI", 10))
+        style.configure("TFrame", background="#f8f9fa")
+        style.configure("TLabel", background="#f8f9fa")
+        style.configure("TButton", padding=6)
+        style.configure("Header.TLabel", font=("Segoe UI", 14, "bold"), foreground="#2c3e50")
+        style.configure("Result.TFrame", background="#ffffff", relief=tk.SUNKEN, borderwidth=1)
+        
+        style.map("TButton",
+            foreground=[("active", "#2c3e50"), ("!active", "#2c3e50")],
+            background=[("active", "#e9ecef"), ("!active", "#f8f9fa")],
+        )
+    
+    def create_widgets(self):
+        main_frame = ttk.Frame(self.root, padding=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        ttk.Label(
+            header_frame,
+            text="Генератор персонального гороскопа",
+            style="Header.TLabel"
+        ).pack(side=tk.LEFT)
+        
+        input_frame = ttk.LabelFrame(main_frame, text=" Ваши персональные данные ", padding=15)
+        input_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        ttk.Label(input_frame, text="Ваше имя:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.name_entry = ttk.Entry(input_frame, width=30)
+        self.name_entry.grid(row=0, column=1, sticky=tk.EW, padx=5, pady=5)
+        
+        ttk.Label(input_frame, text="Дата рождения (дд.мм):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.birth_entry = ttk.Entry(input_frame, width=10)
+        self.birth_entry.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
+        
+        generate_btn = ttk.Button(
+            input_frame,
+            text="🔮 Сгенерировать гороскоп",
+            command=self.generate_horoscope
+        )
+        generate_btn.grid(row=2, column=0, columnspan=2, pady=10)
+        
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+        
+        self.create_general_tab()
+        self.create_advice_tab()
+        self.create_details_tab()
+        self.create_compatibility_tab()
+        
+        self.status_var = tk.StringVar()
+        status_bar = ttk.Label(
+            main_frame,
+            textvariable=self.status_var,
+            relief=tk.SUNKEN,
+            anchor=tk.W,
+            padding=5
+        )
+        status_bar.pack(fill=tk.X, pady=(10, 0))
+    
+    def create_general_tab(self):
+        self.general_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.general_tab, text="Общий прогноз")
+        
+        self.general_text = scrolledtext.ScrolledText(
+            self.general_tab,
+            wrap=tk.WORD,
+            font=("Segoe UI", 11),
+            padx=15,
+            pady=15,
+            state=tk.DISABLED,
+            background="#ffffff",
+            foreground="#2c3e50"
+        )
+        self.general_text.pack(fill=tk.BOTH, expand=True)
+    
+    def create_advice_tab(self):
+        self.advice_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.advice_tab, text="Персональные советы")
+        
+        self.advice_text = scrolledtext.ScrolledText(
+            self.advice_tab,
+            wrap=tk.WORD,
+            font=("Segoe UI", 11),
+            padx=15,
+            pady=15,
+            state=tk.DISABLED,
+            background="#ffffff",
+            foreground="#2c3e50"
+        )
+        self.advice_text.pack(fill=tk.BOTH, expand=True)
+    
+    def create_details_tab(self):
+        self.details_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.details_tab, text="Астродетали")
+        
+        self.details_text = scrolledtext.ScrolledText(
+            self.details_tab,
+            wrap=tk.WORD,
+            font=("Segoe UI", 11),
+            padx=15,
+            pady=15,
+            state=tk.DISABLED,
+            background="#ffffff",
+            foreground="#2c3e50"
+        )
+        self.details_text.pack(fill=tk.BOTH, expand=True)
+    
+    def create_compatibility_tab(self):
+        self.compat_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.compat_tab, text="Совместимость")
+        
+        self.compat_text = scrolledtext.ScrolledText(
+            self.compat_tab,
+            wrap=tk.WORD,
+            font=("Segoe UI", 11),
+            padx=15,
+            pady=15,
+            state=tk.DISABLED,
+            background="#ffffff",
+            foreground="#2c3e50"
+        )
+        self.compat_text.pack(fill=tk.BOTH, expand=True)
+    
+    def calculate_zodiac_sign(self, day: int, month: int) -> Optional[Tuple[str, str]]:
+        if (month == 3 and day >= 21) or (month == 4 and day <= 19):
+            return 'овен'
+        elif (month == 4 and day >= 20) or (month == 5 and day <= 20):
+            return 'телец'
+        elif (month == 5 and day >= 21) or (month == 6 and day <= 20):
+            return 'близнецы'
+        elif (month == 6 and day >= 21) or (month == 7 and day <= 22):
+            return 'рак'
+        elif (month == 7 and day >= 23) or (month == 8 and day <= 22):
+            return 'лев'
+        elif (month == 8 and day >= 23) or (month == 9 and day <= 22):
+            return 'дева'
+        elif (month == 9 and day >= 23) or (month == 10 and day <= 22):
+            return 'весы'
+        elif (month == 10 and day >= 23) or (month == 11 and day <= 21):
+            return 'скорпион'
+        elif (month == 11 and day >= 22) or (month == 12 and day <= 21):
+            return 'стрелец'
+        elif (month == 12 and day >= 22) or (month == 1 and day <= 19):
+            return 'козерог'
+        elif (month == 1 and day >= 20) or (month == 2 and day <= 18):
+            return 'водолей'
+        elif (month == 2 and day >= 19) or (month == 3 and day <= 20):
+            return 'рыбы'
+        return None
+    
+    def _scrape_horoscope(self, sign_en: str) -> str:
+        try:
+            url = f"https://www.horoscope.com/us/horoscopes/general/horoscope-general-daily.aspx?sign={sign_en}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            horoscope = soup.find('div', class_='main-horoscope')
+            if horoscope:
+                return horoscope.get_text(strip=True)
+            
+        except Exception as e:
+            print(f"Ошибка парсинга: {e}", file=sys.stderr)
+        
+        return (
+            f"Сегодняшний день принесет {random.choice(['неожиданные', 'радостные', 'интересные'])} события. "
+            f"Звезды советуют проявить {random.choice(['осторожность', 'инициативу', 'терпение'])} "
+            f"в вопросах, связанных с {random.choice(['личными отношениями', 'финансами', 'карьерой'])}. "
+            f"Благоприятное время для {random.choice(['новых начинаний', 'завершения старых дел', 'саморазвития'])}."
+        )
+    
+    def _generate_detailed_advice(self, name: str, sign: str) -> List[str]:
+        sign_data = self.signs.get(sign, ('', '🌟', '', ''))
+        sign_emoji = sign_data[1]
+        ruling_planet = sign_data[2]
+        
+        name_number = sum(ord(c.lower()) - ord('а') + 1 for c in name if c.isalpha()) % 9 or 9
+        
+        advice = [
+            f"{sign_emoji} {random.choice(list(self.advice_types.values()))}: "
+            f"{random.choice(['Ваш день начнется с неожиданного события', 
+                            'Сегодня стоит прислушаться к своей интуиции',
+                            'Звезды благосклонны к вашим начинаниям'])}",
+            
+            f"🔢 Нумерологический совет (число {name_number}): "
+            f"{random.choice(['Сегодня ваш счастливый день', 
+                            'Обратите внимание на знаки судьбы',
+                            'Число дня принесет вам удачу'])}",
+            
+            f"🪐 Влияние {ruling_planet}: "
+            f"{random.choice(['усилит вашу интуицию', 
+                            'поможет в принятии решений',
+                            'принесет творческое вдохновение'])}",
+            
+            f"💫 {name}, сегодня особенно важно: "
+            f"{random.choice(['проявить гибкость в общении', 
+                            'сосредоточиться на главном',
+                            'не бояться перемен'])}",
+            
+            f"🌟 Рекомендация дня: "
+            f"{random.choice(['Найдите время для себя', 
+                            'Проявите инициативу на работе',
+                            'Побалуйте себя чем-то приятным'])}"
+        ]
+        
+        return advice
+    
+    def _generate_compatibility(self, sign: str) -> str:
+        compatible_signs = random.sample(list(self.signs.keys()), 3)
+        incompatible_signs = random.sample(
+            [s for s in self.signs.keys() if s not in compatible_signs], 
+            2
+        )
+        
+        return (
+            f"Лучшая совместимость сегодня с: {', '.join(compatible_signs)}\n\n"
+            f"Сложности могут возникнуть с: {', '.join(incompatible_signs)}\n\n"
+            f"Совет по отношениям: {random.choice([
+                'Будьте терпимы к мнению других',
+                'Проявите инициативу в общении',
+                'Избегайте конфликтов сегодня'
+            ])}"
+        )
+    
+    def generate_horoscope(self):
+        name = self.name_entry.get().strip()
+        birth_date = self.birth_entry.get().strip()
+        
+        if not name or not birth_date:
+            messagebox.showwarning("Ошибка", "Пожалуйста, введите имя и дату рождения")
+            return
+        
+        try:
+            day, month = map(int, birth_date.split('.'))
+            if not (1 <= day <= 31 and 1 <= month <= 12):
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Ошибка", "Некорректный формат даты. Используйте дд.мм (например, 15.04)")
+            return
+        
+        try:
+            sign = self.calculate_zodiac_sign(day, month) or random.choice(list(self.signs.keys()))
+            sign_data = self.signs.get(sign, ('', '🌟', '', ''))
+            
+            general_horo = self._scrape_horoscope(sign_data[0])
+            detailed_advice = self._generate_detailed_advice(name, sign)
+            compatibility = self._generate_compatibility(sign)
+            
+            details = [
+                f"🌟 Знак зодиака: {sign.capitalize()} {sign_data[1]}",
+                f"🪐 Правящая планета: {sign_data[2]} ({sign_data[3]})",
+                f"🔢 Счастливые числа: {', '.join(map(str, sorted(random.sample(range(1, 50), 3))))}",
+                f"🌈 Счастливый цвет: {random.choice(['красный', 'синий', 'зеленый', 'золотой', 'серебряный', 'фиолетовый'])}",
+                f"📅 Благоприятный день: {random.choice(['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'])}",
+                f"💎 Камень-талисман: {random.choice(['аметист', 'рубин', 'изумруд', 'сапфир', 'топаз', 'гранат', 'жемчуг'])}",
+                f"🌿 Аромат дня: {random.choice(['лаванда', 'жасмин', 'сандал', 'розмарин', 'мята', 'ваниль'])}"
+            ]
+            
+            self.update_result_tabs(general_horo, detailed_advice, details, compatibility)
+            self.status_var.set(f"✨ Гороскоп для {name} готов! ✨")
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
+            self.status_var.set("Ошибка при генерации гороскопа")
+    
+    def update_result_tabs(self, general: str, advice: List[str], details: List[str], compatibility: str):
+        self.general_text.config(state=tk.NORMAL)
+        self.general_text.delete(1.0, tk.END)
+        self.general_text.insert(tk.END, general)
+        self.general_text.config(state=tk.DISABLED)
+        
+        self.advice_text.config(state=tk.NORMAL)
+        self.advice_text.delete(1.0, tk.END)
+        self.advice_text.insert(tk.END, "\n\n".join(advice))
+        self.advice_text.config(state=tk.DISABLED)
+        
+        self.details_text.config(state=tk.NORMAL)
+        self.details_text.delete(1.0, tk.END)
+        self.details_text.insert(tk.END, "\n\n".join(details))
+        self.details_text.config(state=tk.DISABLED)
+        
+        self.compat_text.config(state=tk.NORMAL)
+        self.compat_text.delete(1.0, tk.END)
+        self.compat_text.insert(tk.END, compatibility)
+        self.compat_text.config(state=tk.DISABLED)
+    
+    def center_window(self):
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+    
+    def on_close(self):
+        if messagebox.askokcancel("Выход", "Вы уверены, что хотите выйти?"):
+            self.root.destroy()
+
+def main():
+    root = tk.Tk()
+    app = HoroscopeApp(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
