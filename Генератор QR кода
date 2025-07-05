@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import qrcode
 from PIL import Image, ImageTk
-import io
 import os
 from datetime import datetime
 from typing import Optional, Tuple
@@ -13,8 +12,8 @@ class QRGeneratorApp:
         self.root.title("Генератор QR-кодов")
         self.root.geometry("500x650")
         self.root.resizable(False, False)
-        self.current_qr_image: Optional[Image.Image] = None
-        self.tk_image: Optional[ImageTk.PhotoImage] = None
+        self.current_qr_image = None
+        self.tk_image = None
         self.setup_styles()
         self.create_widgets()
         self.center_window()
@@ -153,7 +152,6 @@ class QRGeneratorApp:
             self.status_var.set(f"Неизвестная ошибка: {str(e)}")
 
     def display_qr(self):
-
         if self.current_qr_image is None:
             return
             
@@ -174,7 +172,6 @@ class QRGeneratorApp:
             return
             
         try:
-
             default_name = f"qr_code_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
             
             file_path = filedialog.asksaveasfilename(
@@ -195,12 +192,10 @@ class QRGeneratorApp:
         if messagebox.askokcancel("Выход", "Вы уверены, что хотите выйти?"):
             self.root.destroy()
 
-
 def main():
     root = tk.Tk()
     app = QRGeneratorApp(root)
     root.mainloop()
-
 
 if __name__ == "__main__":
     main()
