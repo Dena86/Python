@@ -1,0 +1,268 @@
+import os
+import threading
+import queue
+from PIL import Image
+from PIL.Image import DecompressionBombWarning
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import warnings
+import logging
+from typing import List, Optional, Tuple
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+warnings.simplefilter('ignore', DecompressionBombWarning)
+
+class WebpToJpegConverter:
+    def __init__(self):
+        self.input_files: List[str] = []
+        self.output_dir: Optional[str] = None
+        self.quality: int = 95
+        self.running = False
+        self.queue = queue.Queue()
+        self.progress = 0
+        self.total_files = 0
+
+    def add_files(self, file_paths: List[str]) -> None:
+        new_files = [f for f in file_paths if f.lower().endswith('.webp') and f not in self.input_files]
+        self.input_files.extend(new_files)
+        logger.info(f"Added {len(new_files)} WEBP files")
+
+    def set_output_dir(self, directory: str) -> None:
+        self.output_dir = directory
+        logger.info(f"Output directory set to: {directory}")
+
+    def set_quality(self, quality: int) -> None:
+        self.quality = max(1, min(100, quality))
+        logger.info(f"JPEG quality set to: {self.quality}")
+
+    def convert_single(self, input_path: str, output_path: str) -> Tuple[bool, str]:
+        try:
+            with Image.open(input_path) as img:
+                if img.mode == 'RGBA':
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[3])
+                    img = background
+
+                exif = img.info.get('exif', None)
+                img.save(output_path, 'JPEG', quality=self.quality, exif=exif, optimize=True)
+            
+            logger.info(f"Converted: {input_path} -> {output_path}")
+            return True, ""
+        except Exception as e:
+            error_msg = f"Error converting {input_path}: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+
+    def worker(self) -> None:
+        while self.running:
+            try:
+                input_path = self.queue.get_nowait()
+                rel_path = os.path.relpath(input_path, start=os.path.dirname(input_path))
+                output_path = os.path.join(self.output_dir, os.path.splitext(rel_path)[0] + '.jpg')
+                
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                success, message = self.convert_single(input_path, output_path)
+                
+                self.progress += 1
+                self.queue.task_done()
+            except queue.Empty:
+                break
+
+    def start_conversion(self, num_threads: int = 4) -> Tuple[int, List[str]]:
+        if not self.input_files:
+            return 0, ["No input files selected"]
+        
+        if not self.output_dir:
+            return 0, ["No output directory selected"]
+
+        self.total_files = len(self.input_files)
+        self.progress = 0
+        self.running = True
+        errors = []
+
+        for file_path in self.input_files:
+            self.queue.put(file_path)
+
+        threads = []
+        for _ in range(min(num_threads, self.total_files)):
+            t = threading.Thread(target=self.worker)
+            t.start()
+            threads.append(t)
+
+        self.queue.join()
+        self.running = False
+
+        for t in threads:
+            t.join()
+
+        success_count = self.progress - len(errors)
+        return success_count, errors
+
+class ConverterApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("WEBP to JPEG Converter")
+        self.geometry("800x600")
+        self.converter = WebpToJpegConverter()
+        
+        self.create_widgets()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def create_widgets(self) -> None:
+        file_frame = ttk.LabelFrame(self, text="Input WEBP Files", padding=10)
+        file_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        self.file_list = tk.Listbox(file_frame, selectmode=tk.EXTENDED)
+        self.file_list.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+
+        scrollbar = ttk.Scrollbar(file_frame, orient=tk.VERTICAL, command=self.file_list.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.file_list.config(yscrollcommand=scrollbar.set)
+
+        btn_frame = ttk.Frame(file_frame)
+        btn_frame.pack(side=tk.RIGHT, padx=5)
+
+        add_btn = ttk.Button(btn_frame, text="Add Files", command=self.add_files)
+        add_btn.pack(fill=tk.X, pady=2)
+
+        add_dir_btn = ttk.Button(btn_frame, text="Add Folder", command=self.add_folder)
+        add_dir_btn.pack(fill=tk.X, pady=2)
+
+        remove_btn = ttk.Button(btn_frame, text="Remove Selected", command=self.remove_files)
+        remove_btn.pack(fill=tk.X, pady=2)
+
+        clear_btn = ttk.Button(btn_frame, text="Clear All", command=self.clear_files)
+        clear_btn.pack(fill=tk.X, pady=2)
+
+        settings_frame = ttk.LabelFrame(self, text="Conversion Settings", padding=10)
+        settings_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Label(settings_frame, text="Output Folder:").grid(row=0, column=0, sticky=tk.W)
+        self.output_dir_var = tk.StringVar()
+        ttk.Entry(settings_frame, textvariable=self.output_dir_var, state='readonly').grid(row=0, column=1, sticky=tk.EW, padx=5)
+        ttk.Button(settings_frame, text="Browse...", command=self.select_output_dir).grid(row=0, column=2, padx=5)
+
+        ttk.Label(settings_frame, text="JPEG Quality (1-100):").grid(row=1, column=0, sticky=tk.W)
+        self.quality_var = tk.IntVar(value=95)
+        ttk.Scale(settings_frame, from_=1, to=100, variable=self.quality_var, 
+                 command=lambda _: self.quality_var.set(int(self.quality_var.get()))).grid(row=1, column=1, sticky=tk.EW, padx=5)
+        ttk.Label(settings_frame, textvariable=self.quality_var).grid(row=1, column=2, padx=5)
+
+        self.progress_frame = ttk.LabelFrame(self, text="Conversion Progress", padding=10)
+        self.progress_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(self.progress_frame, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(fill=tk.X)
+
+        self.status_var = tk.StringVar(value="Ready")
+        ttk.Label(self.progress_frame, textvariable=self.status_var).pack()
+
+        convert_btn = ttk.Button(self, text="Start Conversion", command=self.start_conversion)
+        convert_btn.pack(pady=10)
+
+        settings_frame.columnconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+
+    def add_files(self) -> None:
+        files = filedialog.askopenfilenames(
+            title="Select WEBP files",
+            filetypes=[("WEBP Images", "*.webp"), ("All files", "*.*")]
+        )
+        if files:
+            self.converter.add_files(files)
+            self.update_file_list()
+
+    def add_folder(self) -> None:
+        directory = filedialog.askdirectory(title="Select folder with WEBP files")
+        if directory:
+            webp_files = []
+            for root, _, files in os.walk(directory):
+                for file in files:
+                    if file.lower().endswith('.webp'):
+                        webp_files.append(os.path.join(root, file))
+            
+            if webp_files:
+                self.converter.add_files(webp_files)
+                self.update_file_list()
+            else:
+                messagebox.showwarning("No WEBP files", "No WEBP files found in the selected directory")
+
+    def remove_files(self) -> None:
+        selected = self.file_list.curselection()
+        if selected:
+            for i in reversed(selected):
+                del self.converter.input_files[i]
+            self.update_file_list()
+
+    def clear_files(self) -> None:
+        self.converter.input_files.clear()
+        self.update_file_list()
+
+    def update_file_list(self) -> None:
+        self.file_list.delete(0, tk.END)
+        for file in self.converter.input_files:
+            self.file_list.insert(tk.END, file)
+
+    def select_output_dir(self) -> None:
+        directory = filedialog.askdirectory(title="Select output directory")
+        if directory:
+            self.output_dir_var.set(directory)
+            self.converter.set_output_dir(directory)
+
+    def start_conversion(self) -> None:
+        if not self.converter.input_files:
+            messagebox.showwarning("No files", "Please add WEBP files to convert")
+            return
+        
+        if not self.output_dir_var.get():
+            messagebox.showwarning("No output directory", "Please select an output directory")
+            return
+
+        self.converter.set_quality(self.quality_var.get())
+
+        self.set_controls_state(False)
+        self.status_var.set("Converting...")
+        self.progress_var.set(0)
+
+        def conversion_thread():
+            total_files = len(self.converter.input_files)
+            success, errors = self.converter.start_conversion()
+            
+            self.after(0, lambda: self.conversion_complete(total_files, success, errors))
+
+        threading.Thread(target=conversion_thread, daemon=True).start()
+
+    def conversion_complete(self, total: int, success: int, errors: List[str]) -> None:
+        self.set_controls_state(True)
+        self.progress_var.set(100)
+        
+        if errors:
+            error_msg = f"Completed with {len(errors)} errors out of {total} files.\n\nFirst error: {errors[0]}"
+            if len(errors) > 1:
+                error_msg += f"\n\n...and {len(errors)-1} more errors"
+            self.status_var.set(f"Completed with {len(errors)} errors")
+            messagebox.showerror("Conversion Complete", error_msg)
+        else:
+            self.status_var.set(f"Successfully converted {success}/{total} files")
+            messagebox.showinfo("Conversion Complete", f"Successfully converted {success} files")
+
+    def set_controls_state(self, enabled: bool) -> None:
+        for child in self.winfo_children():
+            if isinstance(child, (ttk.Button, ttk.Entry)):
+                child.state(["!disabled" if enabled else "disabled"])
+
+    def on_close(self) -> None:
+        if self.converter.running:
+            if messagebox.askokcancel("Quit", "Conversion is in progress. Are you sure you want to quit?"):
+                self.converter.running = False
+                self.destroy()
+        else:
+            self.destroy()
+
+if __name__ == "__main__":
+    app = ConverterApp()
+    app.mainloop()
